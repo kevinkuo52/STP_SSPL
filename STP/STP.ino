@@ -10,35 +10,41 @@
 #include <Adafruit_CCS811.h>
 #include <Adafruit_INA219.h>
 #include <SD.h>
-#include <SD_t3.h>
+//#include <SD_t3.h>
 #include <Printers.h>
 #include <XBee.h>
+#include "TinyGPS++.h"
 
 
-//////////////////////////////  OBJECTS INIT  ////////////////////////////////////////////
+//////////////////////////////  OBJECTS INIT  //////////////////////////////////////////
 
 
 Adafruit_MPL3115A2 baro = Adafruit_MPL3115A2();
-SoftwareSerial mySerial(RxPin, TxPin);  //TODO: replace RxPin, TxPin with correct pin#
-Adafruit_GPS GPS(&mySerial)
+//SoftwareSerial mySerial(0, 1);  //TODO: replace RxPin, TxPin with correct pin#
+//Adafruit_GPS GPS(&mySerial);
 Adafruit_MMA8451 mma = Adafruit_MMA8451();
 Adafruit_CCS811 ccs;
 Adafruit_INA219 ina219;
 XBee xbee = XBee();
+TinyGPSPlus TGPS;
 
 
 /////////////////////////////SENSORS' GLOBAL VARIABLES/////////////////////////////////////
 
 
-#define UVpin 2 //TODO set the UVpin
-#define buzzer 9 //TODO set the buzzer pin
+#define UVpin 5 //TODO set the UVpin
+#define MULTIPIN 15
+const int RS = 10;          // Shunt resistor value (in ohms)
+const int VOLTAGE_REF = 5;  // Reference voltage for analog read
+
+//#define buzzer 9 //TODO set the buzzer pin
 
 bool decending = false;
 float UVreading = 0;
 File SD_File;
 
 struct PAT {
-  float pascales;
+  float pascals;
   float altm;
   float tempC;
 } pat;
@@ -77,11 +83,7 @@ struct GAS {
 } gas;
 
 struct multimeter {
-  float shunt_voltage;
-  float bus_voltage;
-  float current_mA;
-  float load_voltage;
-  float power_mW;
+  float current;
 } multi;
 
 
@@ -99,7 +101,7 @@ void PAT_init() {
 }
 
 void sensor_PAT() {
-  pat.pascals = baro.getPressure();   //pascals/3377 Inches (Hg)
+  //pat.pascals = baro.getPressure();   //pascals/3377 Inches (Hg)
   pat.altm = baro.getAltitude();
   pat.tempC = baro.getTemperature();
 }
@@ -107,7 +109,19 @@ void sensor_PAT() {
 
 /////////////////////////// SENSOR: GPS //////////////////////////////////////////////////
 
-
+void GPS_init(){
+  Serial2.begin(9600);
+}
+void sensor_GPS(){
+  if(Serial2.available()>0){
+    TGPS.encode(Serial2.read());
+  }
+  if (TGPS.altitude.isUpdated()){
+    Serial.println(TGPS.altitude.meters());
+  }
+  
+}
+/*
 void GPS_init() {
   GPS.begin(9600);
   GPS.sendCommand(PMTK_SET_NMEA_OUTPUT_RMCGGA); //Sets output to only RMC and GGA sentences
@@ -138,7 +152,7 @@ void sensor_GPS() {
     Serial.println("GPS not fix");
   }
 }
-
+*/
 
 ////////////////////////  SENSOR: Accelerometer //////////////////////////////////////////
 
@@ -172,6 +186,11 @@ void sensor_accel() {
   //(U or D + B or F combination for Portrait, R or L + F or B combination for Landscape)
   accel.orientation = mma.getOrientation();
   //delay used in example: 500
+  Serial.print(accel.x);
+  Serial.print(accel.y);
+  Serial.print(accel.z);
+  Serial.print(accel.accel_x);
+  
 }
 
 
@@ -213,7 +232,8 @@ void sensor_gas() {
 
 
 void multi_init() {
-  uint32_t currentFrequency;
+  /*
+  //uint32_t currentFrequency;
 
   // Initialize the INA219.
   // By default the initialization will use the largest range (32V, 2A).  However
@@ -223,14 +243,31 @@ void multi_init() {
   //ina219.setCalibration_32V_1A();
   // Or to use a lower 16V, 400mA range (higher precision on volts and amps):
   //ina219.setCalibration_16V_400mA();
+  */
+  
 }
 
 void sensor_multi() {
+  // Read a value from the INA169 board
+  float sensorValue = analogRead(MULTIPIN);
+
+  // Remap the ADC value into a voltage number (5V reference)
+  sensorValue = (sensorValue * VOLTAGE_REF) / 1023;
+
+  // Follow the equation given by the INA169 datasheet to
+  // determine the current flowing through RS. Assume RL = 10k
+  // Is = (Vout x 1k) / (RS x RL)
+  multi.current = sensorValue / (10 * RS);
+
+  // Output value (in amps) to the serial monitor to 3 decimal
+  // places
+  /*
   multi.shunt_voltage = ina219.getShuntVoltage_mV();        //  mV
   multi.bus_voltage = ina219.getBusVoltage_V();             //  V
   multi.current_mA = ina219.getCurrent_mA();                //  mA
   multi.power_mW = ina219.getPower_mW();                    //  mW
-  multi.load_voltage = busvoltage + (shuntvoltage / 1000);  //  V
+  multi.load_voltage = multi.bus_voltage + (multi.shunt_voltage / 1000);  //  V
+  */
   // delay used in example: 2000
 }
 
@@ -249,7 +286,7 @@ void sensor_UV() {
 
 ////////////////////////////////////////////  Buzzer  /////////////////////////////////////////////////////////////////////////
 
-
+/*
 void buzzer_init(){
   pinMode(buzzer, OUTPUT);
 }
@@ -267,11 +304,11 @@ void buzzer(){
     digitalWrite(buzzer, LOW);
   }
 }
-
+*/
 
 //////////////////////////////////////////// SD Card //////////////////////////////////////////////////////////////////////////
 
-
+/*
 void SD_init() {
   // On the Ethernet Shield, CS is pin 4. It's set as an output by default.
   // Note that even if it's not used as the CS pin, the hardware SS pin
@@ -290,7 +327,7 @@ void write_to_SD() {
 
   if (SD_File) {
     // writing PAT data
-    SD_File.print("Pressure: " + pat.pascals / 3377); SD_File.println(" Inches (Hg)");
+    SD_File.print("Pressure: " + (float)pat.pascals / 3377); SD_File.println(" Inches (Hg)");
     SD_File.print("Altitude: " + pat.altm); SD_File.println(" meters");
     SD_File.print("Temperature: " + pat.tempC); SD_File.println("*C");
 
@@ -369,17 +406,69 @@ void write_to_SD() {
     Serial.println("error opening test.txt");
   }
 }
+*/
+void SD_init() {
+  // On the Ethernet Shield, CS is pin 4. It's set as an output by default.
+  // Note that even if it's not used as the CS pin, the hardware SS pin
+  // (10 on most Arduino boards, 53 on the Mega) must be left as an output
+  // or the SD library functions will not work.
+  pinMode(11, OUTPUT);
+  if (!SD.begin(11)) {
+    Serial.println("SD CARD FAIL");
+    return;
+  }
+  Serial.println("SD init done.");
+}
+
+void write_to_SD() {
+  SD_File = SD.open("TEST.txt", FILE_WRITE);
+  Serial.println("r");
+  SD_File.println("test");
+  SD_File.close();
+  /*
+  if (SD_File) {
+    SD_File.println("test");
+    SD_File.close();
+  } else {
+    // if the file didn't open, print an error:
+    Serial.println("error opening test.txt");
+    
+  }
+  */
+}
 
 //////////////////////////////////////////////// Communcation //////////////////////////////////////////////////////////////
 
 void comm_init() {
-  xbee.setSerial(Serial);
+  //xbee.setSerial(Serial);
+  //Serial3.begin(9600);
 }
 
 void send_data() {
+  /*
   uint8_t payload[] = {}; // can only send 8 bit
   Tx16Request tx = Tx16Request(0x1874, payload, sizeof(payload)); //TODO address of remote XBee
   xbee.send(tx);
+  */
+  //Serial.print("x :");
+  //Serial.print(accel.accel_x);
+  //Serial.print(accel.accel_y);
+  //Serial.print(accel.accel_z);
+  Serial.print("p: ");Serial.println(pat.pascals/3377);
+  Serial.print("alt: ");Serial.println(pat.altm);
+  Serial.print("tempC: ");Serial.println(pat.tempC);
+  //Serial.print("sdiofjew'ds");
+  //Serial.print("co2: ");Serial.println(gas.eCO2);
+  //Serial.print("TVOC: ");Serial.println(gas.TVOC);
+  //Serial.print("temp: ");Serial.println(gas.temp);
+  //Serial.print("current: "); Serial.println(multi.current);
+  /*
+  Serial.print("shunt voltage(mV): ");Serial.println( multi.shunt_voltage);
+  Serial.print("bus voltage(V): ");Serial.println( multi.bus_voltage);
+  Serial.print("current(mA): ");Serial.println( multi.current_mA);
+  Serial.print("power(mW): ");Serial.println( multi.power_mW);
+  Serial.print("load voltage(V): ");Serial.println( multi.load_voltage);
+  */
 }
 
 
@@ -387,20 +476,24 @@ void send_data() {
 
 
 void setup() {
-  Serial.begin(115200);
+  Serial.begin(9600);
+  //SD_init();
   PAT_init();
-  GPS_init();
-  accel_init();
-  gas_init();
-  UV_init();
+  //GPS_init();
+  //accel_init();
+  //gas_init();
+  //UV_init();
+  //multi_init();
   comm_init();
-  buzzer_init();
+  
+  //buzzer_init();
 }
 
 uint32_t timer = millis();
 bool dataSent = false;
 
 void loop() {
+  /*
   if (timer > millis())  timer = millis();
   if (millis() - timer > 500) {
     timer = millis();
@@ -418,4 +511,14 @@ void loop() {
     }
     buzzer();
   }
+  */
+  //sensor_GPS();
+  sensor_PAT();
+  //sensor_accel();
+  //sensor_gas();
+  //send_data();
+  //sensor_multi();
+  send_data();
+  //Serial.print("hello12");
+  //write_to_SD();
 }
